@@ -68,8 +68,8 @@ fn start_handoflesser(app: tauri::AppHandle) -> Result<bool, String> {
     }
 
     let candidates = [
-        std::path::PathBuf::from(r"C:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR\\bin\\win64\\vrpathreg.exe"),
-        std::path::PathBuf::from(r"C:\\Program Files\\Steam\\steamapps\\common\\SteamVR\\bin\\win64\\vrpathreg.exe"),
+        std::path::PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\SteamVR\bin\win64\vrpathreg.exe"),
+        std::path::PathBuf::from(r"C:\Program Files\Steam\steamapps\common\SteamVR\bin\win64\vrpathreg.exe"),
     ];
     if let Some(vrpathreg) = candidates.iter().find(|p| p.exists()) {
         let _ = Command::new(vrpathreg).arg("removedriverswithname").arg("00handoflesser").status();
@@ -90,10 +90,12 @@ fn start_handoflesser(app: tauri::AppHandle) -> Result<bool, String> {
 
 '@
           $lib = $lib.Replace($marker, $insert + $marker)
-          $handler = '            get_cameras,'
-          $lib = $lib.Replace($handler, '            start_handoflesser,`n            get_cameras,')
+          $lib = $lib.Replace('            get_cameras,', '            start_handoflesser,`n            get_cameras,')
           $setupMarker = '            Ok(())'
-          $lib = $lib.Replace($setupMarker, '            let _ = start_handoflesser(app.handle().clone());`n            Ok(())', 1)
+          $setupIndex = $lib.LastIndexOf($setupMarker)
+          if ($setupIndex -lt 0) { throw 'Could not locate Tauri setup return marker.' }
+          $startup = '            let _ = start_handoflesser(app.handle().clone());`n'
+          $lib = $lib.Insert($setupIndex, $startup)
           Set-Content $libPath $lib -Encoding UTF8
 
           @'
@@ -110,8 +112,6 @@ fn start_handoflesser(app: tauri::AppHandle) -> Result<bool, String> {
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: third_party/VRchatFACE-HAND-ARM-tracking/hub/package.json
 
       - name: Build unified Hands4VR executable
         shell: cmd
