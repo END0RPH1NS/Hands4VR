@@ -1,0 +1,47 @@
+name: Build Hands4VR
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Hands4VR
+        uses: actions/checkout@v4
+
+      - name: Clone HandOfLesser source
+        shell: pwsh
+        run: |
+          git clone --recursive --depth 1 https://github.com/TheRoughy/HandOfLesser.git third_party/HandOfLesser
+
+      - name: Build HandOfLesser
+        shell: cmd
+        working-directory: third_party/HandOfLesser
+        run: build.bat release --clean
+
+      - name: Assemble Hands4VR package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/Hands4VR | Out-Null
+          Copy-Item -Recurse -Force third_party/HandOfLesser/output/* dist/Hands4VR/
+          $app = Get-ChildItem dist/Hands4VR -Filter HandOfLesser.exe -Recurse | Select-Object -First 1
+          if (-not $app) { throw 'HandOfLesser.exe was not produced by the upstream build.' }
+          Rename-Item $app.FullName 'Hands4VR.exe'
+          @'
+          Hands4VR
+          
+          Built from TheRoughy/HandOfLesser with its SteamVR driver and OpenXR hand-tracking components.
+          '@ | Set-Content dist/Hands4VR/BUILD_INFO.txt -Encoding UTF8
+
+      - name: Upload Hands4VR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hands4VR-Windows-x64
+          path: dist/Hands4VR
+          if-no-files-found: error
+          retention-days: 30
