@@ -74,25 +74,17 @@ jobs:
             if (-not $candidate) { throw 'Hands4VR executable was not produced.' }
             Copy-Item $candidate.FullName $exe -Force
           }
-
           New-Item -ItemType Directory -Force -Path dist/Hands4VR | Out-Null
           Copy-Item $exe dist/Hands4VR/Hands4VR.exe -Force
           if (Test-Path (Join-Path $release 'bundle/nsis')) { Copy-Item -Recurse -Force (Join-Path $release 'bundle/nsis/*') dist/Hands4VR/ }
           if (Test-Path (Join-Path $release 'bundle/msi')) { Copy-Item -Recurse -Force (Join-Path $release 'bundle/msi/*') dist/Hands4VR/ }
           Copy-Item BUILD_COMPONENTS.txt dist/Hands4VR/BUILD_COMPONENTS.txt -Force
-
           $sourceArchive = 'dist/Hands4VR/source-components'
           New-Item -ItemType Directory -Force -Path $sourceArchive | Out-Null
           Copy-Item -Recurse -Force third_party/VRC-Skeletal-Hands $sourceArchive/VRC-Skeletal-Hands
           Copy-Item -Recurse -Force third_party/HandCameraDriver $sourceArchive/HandCameraDriver
           Copy-Item -Recurse -Force third_party/aethervr $sourceArchive/aethervr
-
-          @'
-Hands4VR
-
-Unified Windows application: VRChat Bridge Hub + HandOfLesser SteamVR/OpenXR driver.
-Additional supplied projects are included under source-components for the unified project.
-'@ | Set-Content dist/Hands4VR/BUILD_INFO.txt -Encoding UTF8
+          "Hands4VR`n`nUnified Windows application: VRChat Bridge Hub + HandOfLesser SteamVR/OpenXR driver.`nAdditional supplied projects are included under source-components." | Set-Content dist/Hands4VR/BUILD_INFO.txt -Encoding UTF8
 
       - name: Upload Hands4VR artifact
         uses: actions/upload-artifact@v4
