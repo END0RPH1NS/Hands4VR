@@ -8,43 +8,142 @@ on:
 jobs:
   build-windows:
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     steps:
       - name: Checkout Hands4VR
         uses: actions/checkout@v4
 
-      - name: Verify Visual Studio toolchain
+      - name: Verify Visual Studio C++ toolchain
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           if (-not (Test-Path $vswhere)) { throw 'vswhere.exe was not found.' }
-          & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0) { throw 'Visual Studio C++ x64 build tools were not found.' }
+          $path = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $path) { throw 'Visual Studio C++ x64 build tools were not found.' }
+          Write-Host "Using Visual Studio: $path"
 
-      - name: Clone HandOfLesser source
+      - name: Clone source projects
         shell: pwsh
         run: |
           git clone --recursive --depth 1 https://github.com/TheRoughy/HandOfLesser.git third_party/HandOfLesser
+          git clone --depth 1 https://github.com/shazamifius/VRchatFACE-HAND-ARM-tracking.git third_party/VRchatFACE-HAND-ARM-tracking
+          git clone --depth 1 https://github.com/Dyslex1k/VRC-Skeletal-Hands.git third_party/VRC-Skeletal-Hands
+          git clone --depth 1 https://github.com/NovaAshwolfDev/HandCameraDriver.git third_party/HandCameraDriver
+          git clone --depth 1 https://github.com/chnoblouch/aethervr.git third_party/aethervr
 
-      - name: Build HandOfLesser
+      - name: Build native SteamVR/OpenXR driver
         shell: cmd
         working-directory: third_party/HandOfLesser
         run: build.bat release --clean
 
-      - name: Assemble Hands4VR package
+      - name: Prepare unified Tauri application
         shell: pwsh
         run: |
+          $hub = Join-Path $PWD 'third_party/VRchatFACE-HAND-ARM-tracking/hub'
+          $resource = Join-Path $hub 'src-tauri/handoflesser'
+          New-Item -ItemType Directory -Force -Path $resource | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $PWD 'third_party/HandOfLesser/output/*') $resource
+
+          $confPath = Join-Path $hub 'src-tauri/tauri.conf.json'
+          $conf = Get-Content $confPath -Raw | ConvertFrom-Json
+          $conf.productName = 'Hands4VR'
+          $conf.identifier = 'com.hands4vr.app'
+          $conf.bundle.resources = @('./handoflesser/')
+          $conf.bundle.targets = @('nsis','msi')
+          $conf | ConvertTo-Json -Depth 20 | Set-Content $confPath -Encoding UTF8
+
+          $libPath = Join-Path $hub 'src-tauri/src/lib.rs'
+          $lib = Get-Content $libPath -Raw
+          $lib = $lib.Replace('use tauri::{State, Manager, Emitter};', 'use tauri::{State, Manager, Emitter};\nuse tauri::path::BaseDirectory;\nuse std::process::Command;')
+          $marker = '/// Get list of available cameras'
+          $insert = @'
+#[tauri::command]
+fn start_handoflesser(app: tauri::AppHandle) -> Result<bool, String> {
+    let driver_dir = app.path().resolve("handoflesser/drivers/00handoflesser", BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    let exe = driver_dir.join("resources/bin/win64/HandOfLesser.exe");
+    if !exe.exists() {
+        return Err(format!("Bundled HandOfLesser.exe not found: {}", exe.display()));
+    }
+
+    let candidates = [
+        std::path::PathBuf::from(r"C:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR\\bin\\win64\\vrpathreg.exe"),
+        std::path::PathBuf::from(r"C:\\Program Files\\Steam\\steamapps\\common\\SteamVR\\bin\\win64\\vrpathreg.exe"),
+    ];
+    if let Some(vrpathreg) = candidates.iter().find(|p| p.exists()) {
+        let _ = Command::new(vrpathreg).arg("removedriverswithname").arg("00handoflesser").status();
+        let _ = Command::new(vrpathreg).arg("adddriver").arg(&driver_dir).status();
+    }
+
+    let _ = Command::new(&exe)
+        .current_dir(&driver_dir)
+        .arg("-activatemultipledrivers")
+        .status();
+
+    Command::new(&exe)
+        .current_dir(&driver_dir)
+        .spawn()
+        .map_err(|e| format!("Failed to start HandOfLesser: {}", e))?;
+    Ok(true)
+}
+
+'@
+          $lib = $lib.Replace($marker, $insert + $marker)
+          $handler = '            get_cameras,'
+          $lib = $lib.Replace($handler, '            start_handoflesser,`n            get_cameras,')
+          $setupMarker = '            Ok(())'
+          $lib = $lib.Replace($setupMarker, '            let _ = start_handoflesser(app.handle().clone());`n            Ok(())', 1)
+          Set-Content $libPath $lib -Encoding UTF8
+
+          @'
+          Hands4VR unified build
+          Core UI/AI/OSC engine: VRChat Bridge Hub
+          Native SteamVR/OpenXR hand driver: HandOfLesser
+          Additional source references included in build: VRC-Skeletal-Hands, HandCameraDriver, AetherVR
+          '@ | Set-Content (Join-Path $PWD 'BUILD_COMPONENTS.txt') -Encoding UTF8
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: third_party/VRchatFACE-HAND-ARM-tracking/hub/package.json
+
+      - name: Build unified Hands4VR executable
+        shell: cmd
+        working-directory: third_party/VRchatFACE-HAND-ARM-tracking/hub
+        run: |
+          npm install
+          npm run build
+
+      - name: Assemble final portable package
+        shell: pwsh
+        run: |
+          $hub = Join-Path $PWD 'third_party/VRchatFACE-HAND-ARM-tracking/hub'
+          $exe = Get-ChildItem (Join-Path $hub 'src-tauri/target/release') -Filter '*.exe' -File | Where-Object { $_.Name -notmatch 'setup|uninstall' } | Select-Object -First 1
+          if (-not $exe) { throw 'Unified Hands4VR executable was not produced.' }
+
           New-Item -ItemType Directory -Force -Path dist/Hands4VR | Out-Null
-          Copy-Item -Recurse -Force third_party/HandOfLesser/output/* dist/Hands4VR/
-          $app = Get-ChildItem dist/Hands4VR -Filter HandOfLesser.exe -Recurse | Select-Object -First 1
-          if (-not $app) { throw 'HandOfLesser.exe was not produced by the upstream build.' }
-          Rename-Item $app.FullName 'Hands4VR.exe'
+          Copy-Item $exe.FullName (Join-Path $PWD 'dist/Hands4VR/Hands4VR.exe') -Force
+          Copy-Item -Recurse -Force (Join-Path $hub 'src-tauri/target/release/bundle/nsis/*') (Join-Path $PWD 'dist/Hands4VR/') -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force (Join-Path $hub 'src-tauri/target/release/bundle/msi/*') (Join-Path $PWD 'dist/Hands4VR/') -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $PWD 'BUILD_COMPONENTS.txt') (Join-Path $PWD 'dist/Hands4VR/BUILD_COMPONENTS.txt') -Force
+
+          $sourceArchive = Join-Path $PWD 'dist/Hands4VR/source-components'
+          New-Item -ItemType Directory -Force -Path $sourceArchive | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $PWD 'third_party/VRC-Skeletal-Hands') (Join-Path $sourceArchive 'VRC-Skeletal-Hands')
+          Copy-Item -Recurse -Force (Join-Path $PWD 'third_party/HandCameraDriver') (Join-Path $sourceArchive 'HandCameraDriver')
+          Copy-Item -Recurse -Force (Join-Path $PWD 'third_party/aethervr') (Join-Path $sourceArchive 'aethervr')
           @'
           Hands4VR
 
-          Built from TheRoughy/HandOfLesser with its SteamVR driver and OpenXR hand-tracking components.
-          '@ | Set-Content dist/Hands4VR/BUILD_INFO.txt -Encoding UTF8
+          Unified Windows application built from the VRChat Bridge Hub Rust/Tauri engine and HandOfLesser SteamVR/OpenXR driver.
+          VRC-Skeletal-Hands, HandCameraDriver and AetherVR are included as source components for the unified project.
+          '@ | Set-Content (Join-Path $PWD 'dist/Hands4VR/BUILD_INFO.txt') -Encoding UTF8
 
       - name: Upload Hands4VR artifact
         uses: actions/upload-artifact@v4
