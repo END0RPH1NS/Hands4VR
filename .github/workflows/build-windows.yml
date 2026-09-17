@@ -42,6 +42,10 @@ jobs:
         working-directory: third_party/HandOfLesser
         run: build.bat release --clean
 
+      - name: Fix desktop camera preview
+        shell: pwsh
+        run: .\scripts\fix-desktop-preview.ps1
+
       - name: Prepare unified Hands4VR sources
         shell: pwsh
         run: .\scripts\prepare-unified.ps1
