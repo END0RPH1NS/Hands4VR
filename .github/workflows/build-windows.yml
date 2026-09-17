@@ -55,27 +55,44 @@ jobs:
           node-version: 20
 
       - name: Build unified Tauri application
-        shell: cmd
+        shell: pwsh
         working-directory: third_party/VRchatFACE-HAND-ARM-tracking/hub
         run: |
+          $ErrorActionPreference = 'Stop'
           npm install
-          npm run build
+          Write-Host '--- package.json scripts ---'
+          node -e "console.log(require('./package.json').scripts)"
+          Write-Host '--- Tauri CLI version ---'
+          npx tauri --version
+          Write-Host '--- Tauri build ---'
+          npx tauri build --ci --bundles nsis,msi
+          Write-Host '--- produced files ---'
+          if (Test-Path 'src-tauri/target') {
+            Get-ChildItem 'src-tauri/target' -Recurse -File -Include *.exe,*.msi | Select-Object FullName,Length | Format-Table -AutoSize
+          } else {
+            throw 'Tauri target directory was not created.'
+          }
 
       - name: Assemble final package
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $hub = Join-Path $PWD 'third_party/VRchatFACE-HAND-ARM-tracking/hub'
           $release = Join-Path $hub 'src-tauri/target/release'
-          $exe = Join-Path $release 'Hands4VR.exe'
-          if (-not (Test-Path $exe)) {
-            $candidate = Get-ChildItem $release -Filter '*.exe' -File | Where-Object { $_.Name -notmatch 'setup|uninstall' } | Select-Object -First 1
-            if (-not $candidate) { throw 'Hands4VR executable was not produced.' }
-            Copy-Item $candidate.FullName $exe -Force
+          if (-not (Test-Path $release)) {
+            throw "Tauri release directory was not produced: $release"
+          }
+          $candidate = Get-ChildItem $release -Filter '*.exe' -File | Where-Object { $_.Name -notmatch 'setup|uninstall' } | Select-Object -First 1
+          if (-not $candidate) {
+            Get-ChildItem (Join-Path $hub 'src-tauri/target') -Recurse -File -Include *.exe,*.msi | Select-Object FullName,Length | Format-Table -AutoSize
+            throw 'No application executable was produced by Tauri.'
           }
           New-Item -ItemType Directory -Force -Path dist/Hands4VR | Out-Null
-          Copy-Item $exe dist/Hands4VR/Hands4VR.exe -Force
-          if (Test-Path (Join-Path $release 'bundle/nsis')) { Copy-Item -Recurse -Force (Join-Path $release 'bundle/nsis/*') dist/Hands4VR/ }
-          if (Test-Path (Join-Path $release 'bundle/msi')) { Copy-Item -Recurse -Force (Join-Path $release 'bundle/msi/*') dist/Hands4VR/ }
+          Copy-Item $candidate.FullName dist/Hands4VR/Hands4VR.exe -Force
+          $nsis = Join-Path $release 'bundle/nsis'
+          $msi = Join-Path $release 'bundle/msi'
+          if (Test-Path $nsis) { Copy-Item -Recurse -Force (Join-Path $nsis '*') dist/Hands4VR/ }
+          if (Test-Path $msi) { Copy-Item -Recurse -Force (Join-Path $msi '*') dist/Hands4VR/ }
           Copy-Item BUILD_COMPONENTS.txt dist/Hands4VR/BUILD_COMPONENTS.txt -Force
           $sourceArchive = 'dist/Hands4VR/source-components'
           New-Item -ItemType Directory -Force -Path $sourceArchive | Out-Null
