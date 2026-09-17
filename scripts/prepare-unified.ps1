@@ -16,9 +16,6 @@ $conf = Get-Content $confPath -Raw | ConvertFrom-Json
 $conf.productName = 'Hands4VR'
 $conf.identifier = 'com.hands4vr.app'
 
-# Tauri v2 does not necessarily expose bundle.resources on the parsed
-# PSCustomObject when the property is absent. Add it explicitly instead of
-# assigning to a missing property.
 if (-not ($conf.bundle.PSObject.Properties.Name -contains 'resources')) {
     $conf.bundle | Add-Member -MemberType NoteProperty -Name 'resources' -Value @('./handoflesser/')
 } else {
@@ -32,10 +29,14 @@ $libPath = Join-Path $hub 'src-tauri/src/lib.rs'
 $lib = Get-Content $libPath -Raw
 
 if ($lib -notmatch 'fn start_handoflesser') {
-    $lib = $lib.Replace(
-        'use tauri::{State, Manager, Emitter};',
-        "use tauri::{State, Manager, Emitter};`nuse tauri::path::BaseDirectory;`nuse std::process::Command;"
-    )
+    $importsOld = 'use tauri::{State, Manager, Emitter};'
+    $importsNew = @'
+use tauri::{State, Manager, Emitter};
+use tauri::path::BaseDirectory;
+use std::process::Command;
+'@.TrimEnd()
+    if ($lib -notmatch [regex]::Escape($importsOld)) { throw 'Could not locate Tauri import line.' }
+    $lib = $lib.Replace($importsOld, $importsNew)
 
     $marker = '/// Get list of available cameras'
     $insert = @'
@@ -66,18 +67,27 @@ fn start_handoflesser(app: tauri::AppHandle) -> Result<bool, String> {
 }
 
 '@
+    if ($lib -notmatch [regex]::Escape($marker)) { throw 'Could not locate camera command marker.' }
     $lib = $lib.Replace($marker, $insert + $marker)
 }
 
 if ($lib -notmatch 'start_handoflesser,') {
-    $lib = $lib.Replace('            get_cameras,', '            start_handoflesser,`n            get_cameras,')
+    $commandsOld = '            get_cameras,'
+    $commandsNew = @'
+            start_handoflesser,
+            get_cameras,
+'@.TrimEnd()
+    if ($lib -notmatch [regex]::Escape($commandsOld)) { throw 'Could not locate get_cameras command registration.' }
+    $lib = $lib.Replace($commandsOld, $commandsNew)
 }
 
 if ($lib -notmatch 'let _ = start_handoflesser') {
     $setupMarker = '            Ok(())'
     $setupIndex = $lib.LastIndexOf($setupMarker)
     if ($setupIndex -lt 0) { throw 'Could not locate Tauri setup return marker.' }
-    $startup = "            let _ = start_handoflesser(app.handle().clone());`n"
+    $startup = @'
+            let _ = start_handoflesser(app.handle().clone());
+'@
     $lib = $lib.Insert($setupIndex, $startup)
 }
 
