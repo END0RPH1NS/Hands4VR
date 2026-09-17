@@ -15,7 +15,16 @@ $confPath = Join-Path $hub 'src-tauri/tauri.conf.json'
 $conf = Get-Content $confPath -Raw | ConvertFrom-Json
 $conf.productName = 'Hands4VR'
 $conf.identifier = 'com.hands4vr.app'
-$conf.bundle.resources = @('./handoflesser/')
+
+# Tauri v2 does not necessarily expose bundle.resources on the parsed
+# PSCustomObject when the property is absent. Add it explicitly instead of
+# assigning to a missing property.
+if (-not ($conf.bundle.PSObject.Properties.Name -contains 'resources')) {
+    $conf.bundle | Add-Member -MemberType NoteProperty -Name 'resources' -Value @('./handoflesser/')
+} else {
+    $conf.bundle.resources = @('./handoflesser/')
+}
+
 $conf.bundle.targets = @('nsis','msi')
 $conf | ConvertTo-Json -Depth 20 | Set-Content $confPath -Encoding UTF8
 
@@ -48,13 +57,9 @@ fn start_handoflesser(app: tauri::AppHandle) -> Result<bool, String> {
         let _ = Command::new(vrpathreg).arg("adddriver").arg(&driver_dir).status();
     }
 
-    let _ = Command::new(&exe)
-        .current_dir(&driver_dir)
-        .arg("-activatemultipledrivers")
-        .status();
-
     Command::new(&exe)
         .current_dir(&driver_dir)
+        .arg("-activatemultipledrivers")
         .spawn()
         .map_err(|e| format!("Failed to start HandOfLesser: {}", e))?;
     Ok(true)
