@@ -37,6 +37,18 @@ jobs:
           git clone --depth 1 https://github.com/NovaAshwolfDev/HandCameraDriver.git third_party/HandCameraDriver
           git clone --depth 1 https://github.com/chnoblouch/aethervr.git third_party/aethervr
 
+      - name: Update Windows camera dependencies
+        shell: pwsh
+        working-directory: third_party/VRchatFACE-HAND-ARM-tracking/hub/src-tauri
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo update -p nokhwa --precise 0.10.11
+          Write-Host 'Pinned Nokhwa to 0.10.11 with current Windows Media Foundation bindings.'
+
+      - name: Patch Windows camera backend
+        shell: pwsh
+        run: .\scripts\patch-camera-backend.ps1
+
       - name: Build HandOfLesser native driver
         shell: cmd
         working-directory: third_party/HandOfLesser
@@ -117,7 +129,7 @@ jobs:
           Copy-Item -Recurse -Force third_party/VRC-Skeletal-Hands $sourceArchive/VRC-Skeletal-Hands
           Copy-Item -Recurse -Force third_party/HandCameraDriver $sourceArchive/HandCameraDriver
           Copy-Item -Recurse -Force third_party/aethervr $sourceArchive/aethervr
-          Set-Content dist/Hands4VR/BUILD_INFO.txt "Hands4VR`n`nUnified Windows application: VRChat Bridge Hub + HandOfLesser SteamVR/OpenXR hand driver.`nAdditional supplied projects are included under source-components." -Encoding UTF8
+          Set-Content dist/Hands4VR/BUILD_INFO.txt "Hands4VR`n`nUnified Windows application: VRChat Bridge Hub + HandOfLesser SteamVR/OpenXR hand driver.`nCamera backend: Nokhwa 0.10.11 / Windows Media Foundation.`nAdditional supplied projects are included under source-components." -Encoding UTF8
 
       - name: Upload Hands4VR artifact
         uses: actions/upload-artifact@v4
