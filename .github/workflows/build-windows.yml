@@ -7,12 +7,20 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 45
 
     steps:
       - name: Checkout Hands4VR
         uses: actions/checkout@v4
+
+      - name: Verify Visual Studio toolchain
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw 'vswhere.exe was not found.' }
+          & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0) { throw 'Visual Studio C++ x64 build tools were not found.' }
 
       - name: Clone HandOfLesser source
         shell: pwsh
@@ -34,7 +42,7 @@ jobs:
           Rename-Item $app.FullName 'Hands4VR.exe'
           @'
           Hands4VR
-          
+
           Built from TheRoughy/HandOfLesser with its SteamVR driver and OpenXR hand-tracking components.
           '@ | Set-Content dist/Hands4VR/BUILD_INFO.txt -Encoding UTF8
 
