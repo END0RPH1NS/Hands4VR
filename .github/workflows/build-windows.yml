@@ -1,4 +1,5 @@
 name: Build Hands4VR
+
 on:
   push:
     branches: [main]
@@ -8,7 +9,8 @@ jobs:
   build-windows:
     name: Windows x64 unified build
     runs-on: windows-2022
-    timeout-minutes: 90
+    timeout-minutes: 120
+
     steps:
       - name: Checkout Hands4VR
         uses: actions/checkout@v4
@@ -22,59 +24,66 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or -not $path) { throw 'Visual Studio C++ x64 build tools were not found.' }
           Write-Host "Using Visual Studio: $path"
 
-      - name: Clone HandOfLesser
-        shell: pwsh
-        run: git clone --recursive --depth 1 https://github.com/TheRoughy/HandOfLesser.git third_party/HandOfLesser
-
-      - name: Clone VRChat Bridge Hub
-        shell: pwsh
-        run: git clone --depth 1 https://github.com/shazamifius/VRchatFACE-HAND-ARM-tracking.git third_party/VRchatFACE-HAND-ARM-tracking
-
-      - name: Clone additional hand tracking sources
+      - name: Clone pinned Bridge Hub
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/Dyslex1k/VRC-Skeletal-Hands.git third_party/VRC-Skeletal-Hands
-          git clone --depth 1 https://github.com/NovaAshwolfDev/HandCameraDriver.git third_party/HandCameraDriver
-          git clone --depth 1 https://github.com/chnoblouch/aethervr.git third_party/aethervr
+          git clone --depth 1 https://github.com/shazamifius/VRchatFACE-HAND-ARM-tracking.git third_party/VRchatFACE-HAND-ARM-tracking
+          git -C third_party/VRchatFACE-HAND-ARM-tracking fetch --depth 1 origin 87bfddc33f66a12cf8e38c33e1546ccb5f2bb1c
+          git -C third_party/VRchatFACE-HAND-ARM-tracking checkout --detach 87bfddc33f66a12cf8e38c33e1546ccb5f2bb1c
 
-      - name: Update Windows camera dependencies
+      - name: Clone pinned HandOfLesser
         shell: pwsh
-        working-directory: third_party/VRchatFACE-HAND-ARM-tracking/hub/src-tauri
         run: |
-          $ErrorActionPreference = 'Stop'
-          cargo update -p nokhwa --precise 0.10.11
-          Write-Host 'Pinned Nokhwa to 0.10.11 with current Windows Media Foundation bindings.'
+          git clone --recursive --depth 1 https://github.com/TheRoughy/HandOfLesser.git third_party/HandOfLesser
+          git -C third_party/HandOfLesser fetch --depth 1 origin a10cc0092c3fe71ba06c68cdbc19d1ad14ad9fff
+          git -C third_party/HandOfLesser checkout --detach a10cc0092c3fe71ba06c68cdbc19d1ad14ad9fff
+          git -C third_party/HandOfLesser submodule update --init --recursive
 
-      - name: Patch Windows camera backend
+      - name: Collect supplied tracking sources
         shell: pwsh
-        run: .\scripts\patch-camera-backend.ps1
+        run: |
+          $projects = @{
+            'VRC-Skeletal-Hands' = 'https://github.com/Dyslex1k/VRC-Skeletal-Hands.git'
+            'HandCameraDriver' = 'https://github.com/NovaAshwolfDev/HandCameraDriver.git'
+            'OpenVR-driver-for-DIY' = 'https://github.com/r57zone/OpenVR-driver-for-DIY.git'
+            'Mediapipe-VR-Fullbody-Tracking' = 'https://github.com/ju1ce/Mediapipe-VR-Fullbody-Tracking.git'
+            'April-Tag-VR-FullBody-Tracker' = 'https://github.com/ju1ce/April-Tag-VR-FullBody-Tracker.git'
+            'VCubeTracker' = 'https://github.com/kurotu/VCubeTracker.git'
+            'mediapipe_VR_controller' = 'https://github.com/vwitted/mediapipe_VR_controller.git'
+            'vrc_osc_tracker' = 'https://github.com/Alpyg/vrc_osc_tracker.git'
+            'leapmotion-osc' = 'https://github.com/ThatGuyThimo/leapmotion-osc.git'
+            'three-mediapipe-rig' = 'https://github.com/bandinopla/three-mediapipe-rig.git'
+            'Virtual-Mouse' = 'https://github.com/whitehatboy005/Virtual-Mouse.git'
+            'HandPose-OSC' = 'https://github.com/faaip/HandPose-OSC.git'
+            'hand-tracking-visualizer' = 'https://github.com/Rayhan-099/hand-tracking-visualizer.git'
+            'barehands' = 'https://github.com/jaredrhod/barehands.git'
+            'minimal-hand' = 'https://github.com/CalciferZh/minimal-hand.git'
+            'VRCThumbParamsOSC' = 'https://github.com/I5UCC/VRCThumbParamsOSC.git'
+            'vrc-avatar-osc-toolkit' = 'https://github.com/Opcode01/vrc-avatar-osc-toolkit.git'
+            'hold' = 'https://github.com/zc-alexfan/hold.git'
+            'arctic' = 'https://github.com/zc-alexfan/arctic.git'
+            'UmeTrack' = 'https://github.com/facebookresearch/UmeTrack.git'
+            'AirPose' = 'https://github.com/justinliang1020/AirPose.git'
+            'wuji-hand-teleop' = 'https://github.com/wuji-technology/wuji-hand-teleop.git'
+            'mediapipe-virtual-controller' = 'https://github.com/ruskinwadia/mediapipe-virtual-controller.git'
+            'SystemAnimatorOnline' = 'https://github.com/ButzYung/SystemAnimatorOnline.git'
+            'VSeeFaceManual' = 'https://github.com/emilianavt/VSeeFaceManual.git'
+          }
+          New-Item -ItemType Directory -Force -Path third_party/sources | Out-Null
+          foreach ($p in $projects.GetEnumerator()) {
+            Write-Host "Collecting $($p.Key)"
+            git clone --depth 1 $p.Value (Join-Path 'third_party/sources' $p.Key)
+            if ($LASTEXITCODE -ne 0) { throw "Failed to clone $($p.Key)" }
+          }
 
       - name: Build HandOfLesser native driver
         shell: cmd
         working-directory: third_party/HandOfLesser
         run: build.bat release --clean
 
-      - name: Fix desktop camera preview
-        shell: pwsh
-        run: .\scripts\fix-desktop-preview.ps1
-
-      - name: Prepare unified Hands4VR sources
+      - name: Prepare unified integration
         shell: pwsh
         run: .\scripts\prepare-unified.ps1
-
-      - name: Sanitize generated Rust source
-        shell: pwsh
-        run: |
-          $libPath = Join-Path $PWD 'third_party/VRchatFACE-HAND-ARM-tracking/hub/src-tauri/src/lib.rs'
-          $lib = Get-Content $libPath -Raw
-          $literal = [string]([char]0x60) + 'n'
-          if ($lib.Contains($literal)) {
-            $lib = $lib.Replace($literal, [Environment]::NewLine)
-            Set-Content $libPath $lib -Encoding UTF8
-            Write-Host 'Removed literal PowerShell newline escape from generated Rust source.'
-          }
-          if ($lib.Contains($literal)) { throw 'Generated Rust still contains a literal backtick-n escape.' }
-          Select-String -Path $libPath -Pattern 'start_handoflesser|get_cameras' | ForEach-Object { $_.Line }
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -90,18 +99,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           npm install
-          Write-Host '--- package.json scripts ---'
-          node -e "console.log(require('./package.json').scripts)"
-          Write-Host '--- Tauri CLI version ---'
           npx tauri --version
-          Write-Host '--- Tauri build ---'
           npx tauri build --ci --bundles nsis,msi
-          Write-Host '--- produced files ---'
-          if (Test-Path 'src-tauri/target') {
-            Get-ChildItem 'src-tauri/target' -Recurse -File -Include *.exe,*.msi | Select-Object FullName,Length | Format-Table -AutoSize
-          } else {
-            throw 'Tauri target directory was not created.'
-          }
 
       - name: Assemble final package
         shell: pwsh
@@ -109,27 +108,33 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $hub = Join-Path $PWD 'third_party/VRchatFACE-HAND-ARM-tracking/hub'
           $release = Join-Path $hub 'src-tauri/target/release'
-          if (-not (Test-Path $release)) {
-            throw "Tauri release directory was not produced: $release"
-          }
-          $candidate = Get-ChildItem $release -Filter '*.exe' -File | Where-Object { $_.Name -notmatch 'setup|uninstall' } | Select-Object -First 1
-          if (-not $candidate) {
-            Get-ChildItem (Join-Path $hub 'src-tauri/target') -Recurse -File -Include *.exe,*.msi | Select-Object FullName,Length | Format-Table -AutoSize
-            throw 'No application executable was produced by Tauri.'
-          }
+          if (-not (Test-Path $release)) { throw "Tauri release directory was not produced: $release" }
+
+          $candidate = Get-ChildItem $release -Filter '*.exe' -File |
+            Where-Object { $_.Name -notmatch 'setup|uninstall' } |
+            Sort-Object Length -Descending |
+            Select-Object -First 1
+          if (-not $candidate) { throw 'No application executable was produced by Tauri.' }
+
           New-Item -ItemType Directory -Force -Path dist/Hands4VR | Out-Null
           Copy-Item $candidate.FullName dist/Hands4VR/Hands4VR.exe -Force
+
           $nsis = Join-Path $release 'bundle/nsis'
           $msi = Join-Path $release 'bundle/msi'
           if (Test-Path $nsis) { Copy-Item -Recurse -Force (Join-Path $nsis '*') dist/Hands4VR/ }
           if (Test-Path $msi) { Copy-Item -Recurse -Force (Join-Path $msi '*') dist/Hands4VR/ }
+
           Copy-Item BUILD_COMPONENTS.txt dist/Hands4VR/BUILD_COMPONENTS.txt -Force
-          $sourceArchive = 'dist/Hands4VR/source-components'
-          New-Item -ItemType Directory -Force -Path $sourceArchive | Out-Null
-          Copy-Item -Recurse -Force third_party/VRC-Skeletal-Hands $sourceArchive/VRC-Skeletal-Hands
-          Copy-Item -Recurse -Force third_party/HandCameraDriver $sourceArchive/HandCameraDriver
-          Copy-Item -Recurse -Force third_party/aethervr $sourceArchive/aethervr
-          Set-Content dist/Hands4VR/BUILD_INFO.txt "Hands4VR`n`nUnified Windows application: VRChat Bridge Hub + HandOfLesser SteamVR/OpenXR hand driver.`nCamera backend: Nokhwa 0.10.11 / Windows Media Foundation.`nAdditional supplied projects are included under source-components." -Encoding UTF8
+          New-Item -ItemType Directory -Force -Path dist/Hands4VR/source-components | Out-Null
+          Copy-Item -Recurse -Force third_party/sources dist/Hands4VR/source-components/
+
+          @"
+          Hands4VR unified Windows build
+          Core GUI/tracking/OSC: VRChat Bridge Hub @ 87bfddc33f66a12cf8e38c33e1546ccb5f2bb1c
+          SteamVR/OpenXR driver: HandOfLesser @ a10cc0092c3fe71ba06c68cdbc19d1ad14ad9fff
+          Camera backend: native Bridge Hub pipeline; no source patching or forced backend override.
+          Additional supplied repositories are staged as source components and are not launched as competing camera processes.
+          "@ | Set-Content dist/Hands4VR/BUILD_INFO.txt -Encoding UTF8
 
       - name: Upload Hands4VR artifact
         uses: actions/upload-artifact@v4
