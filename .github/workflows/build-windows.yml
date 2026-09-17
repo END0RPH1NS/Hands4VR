@@ -46,6 +46,20 @@ jobs:
         shell: pwsh
         run: .\scripts\prepare-unified.ps1
 
+      - name: Sanitize generated Rust source
+        shell: pwsh
+        run: |
+          $libPath = Join-Path $PWD 'third_party/VRchatFACE-HAND-ARM-tracking/hub/src-tauri/src/lib.rs'
+          $lib = Get-Content $libPath -Raw
+          $literal = [string]([char]0x60) + 'n'
+          if ($lib.Contains($literal)) {
+            $lib = $lib.Replace($literal, [Environment]::NewLine)
+            Set-Content $libPath $lib -Encoding UTF8
+            Write-Host 'Removed literal PowerShell newline escape from generated Rust source.'
+          }
+          if ($lib.Contains($literal)) { throw 'Generated Rust still contains a literal backtick-n escape.' }
+          Select-String -Path $libPath -Pattern 'start_handoflesser|get_cameras' | ForEach-Object { $_.Line }
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -99,7 +113,7 @@ jobs:
           Copy-Item -Recurse -Force third_party/VRC-Skeletal-Hands $sourceArchive/VRC-Skeletal-Hands
           Copy-Item -Recurse -Force third_party/HandCameraDriver $sourceArchive/HandCameraDriver
           Copy-Item -Recurse -Force third_party/aethervr $sourceArchive/aethervr
-          Set-Content dist/Hands4VR/BUILD_INFO.txt "Hands4VR`n`nUnified Windows application: VRChat Bridge Hub + HandOfLesser SteamVR/OpenXR driver.`nAdditional supplied projects are included under source-components." -Encoding UTF8
+          Set-Content dist/Hands4VR/BUILD_INFO.txt "Hands4VR`n`nUnified Windows application: VRChat Bridge Hub + HandOfLesser SteamVR/OpenXR hand driver.`nAdditional supplied projects are included under source-components." -Encoding UTF8
 
       - name: Upload Hands4VR artifact
         uses: actions/upload-artifact@v4
