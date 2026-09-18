@@ -43,37 +43,29 @@ jobs:
         shell: pwsh
         run: |
           $projects = @{
-            'VRC-Skeletal-Hands' = 'https://github.com/Dyslex1k/VRC-Skeletal-Hands.git'
-            'HandCameraDriver' = 'https://github.com/NovaAshwolfDev/HandCameraDriver.git'
-            'OpenVR-driver-for-DIY' = 'https://github.com/r57zone/OpenVR-driver-for-DIY.git'
-            'Mediapipe-VR-Fullbody-Tracking' = 'https://github.com/ju1ce/Mediapipe-VR-Fullbody-Tracking.git'
-            'April-Tag-VR-FullBody-Tracker' = 'https://github.com/ju1ce/April-Tag-VR-FullBody-Tracker.git'
-            'VCubeTracker' = 'https://github.com/kurotu/VCubeTracker.git'
-            'mediapipe_VR_controller' = 'https://github.com/vwitted/mediapipe_VR_controller.git'
-            'vrc_osc_tracker' = 'https://github.com/Alpyg/vrc_osc_tracker.git'
-            'leapmotion-osc' = 'https://github.com/ThatGuyThimo/leapmotion-osc.git'
-            'three-mediapipe-rig' = 'https://github.com/bandinopla/three-mediapipe-rig.git'
-            'Virtual-Mouse' = 'https://github.com/whitehatboy005/Virtual-Mouse.git'
-            'HandPose-OSC' = 'https://github.com/faaip/HandPose-OSC.git'
-            'hand-tracking-visualizer' = 'https://github.com/Rayhan-099/hand-tracking-visualizer.git'
-            'barehands' = 'https://github.com/jaredrhod/barehands.git'
-            'minimal-hand' = 'https://github.com/CalciferZh/minimal-hand.git'
-            'VRCThumbParamsOSC' = 'https://github.com/I5UCC/VRCThumbParamsOSC.git'
-            'vrc-avatar-osc-toolkit' = 'https://github.com/Opcode01/vrc-avatar-osc-toolkit.git'
-            'hold' = 'https://github.com/zc-alexfan/hold.git'
-            'arctic' = 'https://github.com/zc-alexfan/arctic.git'
-            'UmeTrack' = 'https://github.com/facebookresearch/UmeTrack.git'
-            'AirPose' = 'https://github.com/justinliang1020/AirPose.git'
-            'wuji-hand-teleop' = 'https://github.com/wuji-technology/wuji-hand-teleop.git'
-            'mediapipe-virtual-controller' = 'https://github.com/ruskinwadia/mediapipe-virtual-controller.git'
-            'SystemAnimatorOnline' = 'https://github.com/ButzYung/SystemAnimatorOnline.git'
-            'VSeeFaceManual' = 'https://github.com/emilianavt/VSeeFaceManual.git'
+            'VRC-Skeletal-Hands' = @{
+              url = 'https://github.com/Dyslex1k/VRC-Skeletal-Hands.git'
+              sha = 'e348af3a48fa1af0d568ed1204946663073ca799'
+            }
+            'HandCameraDriver' = @{
+              url = 'https://github.com/NovaAshwolfDev/HandCameraDriver.git'
+              sha = '10f1216ddddf298c455d30d5827b2415470aba01'
+            }
+            'aethervr' = @{
+              url = 'https://github.com/chnoblouch/aethervr.git'
+              sha = '4fe854d0b5b32da2b1f0ae423b1b7210259fb286'
+            }
           }
           New-Item -ItemType Directory -Force -Path third_party/sources | Out-Null
           foreach ($p in $projects.GetEnumerator()) {
-            Write-Host "Collecting $($p.Key)"
-            git clone --depth 1 $p.Value (Join-Path 'third_party/sources' $p.Key)
+            $dst = Join-Path 'third_party/sources' $p.Key
+            Write-Host "Collecting $($p.Key) @ $($p.Value.sha)"
+            git clone --depth 1 $p.Value.url $dst
             if ($LASTEXITCODE -ne 0) { throw "Failed to clone $($p.Key)" }
+            git -C $dst fetch --depth 1 origin $p.Value.sha
+            if ($LASTEXITCODE -ne 0) { throw "Failed to fetch pinned commit for $($p.Key)" }
+            git -C $dst checkout --detach $p.Value.sha
+            if ($LASTEXITCODE -ne 0) { throw "Failed to checkout pinned commit for $($p.Key)" }
           }
 
       - name: Build HandOfLesser native driver
