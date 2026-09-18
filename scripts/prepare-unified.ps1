@@ -176,11 +176,89 @@ if ($lib -notmatch 'let _ = start_handoflesser') {
 
 Set-Content $libPath $lib -Encoding UTF8
 
+
+# Harden the runtime camera path.
+# nokhwa 0.10.10 contains Windows Media Foundation fixes for device-format
+# creation/opening, while the tracking engine below now preflights a real frame
+# before reporting the engine as running.
+$cargoPath = Join-Path $hub 'src-tauri/Cargo.toml'
+$cargo = Get-Content $cargoPath -Raw
+$cargo = $cargo.Replace('nokhwa = { version = "0.10", features = ["input-native", "input-msmf", "output-threaded"] }', 'nokhwa = { version = "=0.10.10", features = ["input-native", "input-msmf", "output-threaded"] }')
+Set-Content $cargoPath $cargo -Encoding UTF8
+
+$trackingPath = Join-Path $hub 'src-tauri/src/tracking/mod.rs'
+$tracking = Get-Content $trackingPath -Raw
+
+$cameraPreflightMarker = '        let mut running_guard = running.lock().unwrap();'
+$cameraPreflight = @'
+        // LOCAL CAMERA PREFLIGHT: do not mark the engine running until the
+        // selected physical camera has opened and returned a real frame.
+        if config.index != 999 {
+            let mut cam = camera.lock().unwrap();
+            if let Err(e) = cam.start(config.clone()) {
+                return Err(anyhow::anyhow!("Camera open failed: {}", e));
+            }
+            if let Err(e) = cam.get_frame() {
+                cam.stop();
+                return Err(anyhow::anyhow!("Camera opened but first frame failed: {}", e));
+            }
+            if let Some(c) = &cam.camera {
+                let fmt = c.camera_format();
+                if let Ok(mut s) = status.lock() {
+                    s.camera_width = fmt.resolution().width();
+                    s.camera_height = fmt.resolution().height();
+                    s.camera_fps_real = fmt.frame_rate() as f32;
+                    s.diagnostic_message = Some(format!(
+                        "Camera ready: {}x{} {:?} @ {}fps",
+                        fmt.resolution().width(),
+                        fmt.resolution().height(),
+                        fmt.format(),
+                        fmt.frame_rate()
+                    ));
+                }
+            }
+        }
+
+'@
+if (-not $tracking.Contains($cameraPreflightMarker)) { throw 'Tracking start guard marker not found.' }
+if (-not $tracking.Contains($cameraPreflight)) {
+    $tracking = $tracking.Replace($cameraPreflightMarker, $cameraPreflight + $cameraPreflightMarker)
+}
+
+$oldCameraThread = @'
+            if let Ok(mut cam) = camera.lock() {
+                 if !use_remote_cam {
+                     if let Err(e) = cam.start(config_clone) { 
+                         crate::logging::log(&format!("[Rust] Failed to start camera: {}", e)); 
+                         return; 
+                     }
+                      if let Ok(mut s) = status_capture.lock() {
+                          if true {
+                              if let Some(c) = &cam.camera {
+                                  let fmt = c.camera_format();
+                                  s.camera_width = fmt.resolution().width();
+                                  s.camera_height = fmt.resolution().height();
+                                  s.camera_fps_real = fmt.frame_rate() as f32;
+                              }
+                          }
+                      }
+                       crate::logging::log("[Rust] Camera started.");
+                 }
+             }
+
+'@
+if (-not $tracking.Contains($oldCameraThread)) { throw 'Background camera-start block not found.' }
+$tracking = $tracking.Replace($oldCameraThread, '            // Local camera was already opened and frame-tested synchronously above.' + [Environment]::NewLine)
+
+Set-Content $trackingPath $tracking -Encoding UTF8
+
+
 @'
 Hands4VR unified build
 Core UI/AI/OSC engine: VRChat Bridge Hub
 Native SteamVR/OpenXR hand driver: HandOfLesser
+Camera runtime: synchronous open + first-frame preflight; nokhwa 0.10.10 Windows Media Foundation fixes
 Additional source components: VRC-Skeletal-Hands, HandCameraDriver, AetherVR
 '@ | Set-Content (Join-Path $root 'BUILD_COMPONENTS.txt') -Encoding UTF8
 
-Write-Host 'Unified Hands4VR source preparation completed.'
+Write-Host 'Unified Hands4VR source preparation completed with hardened camera startup.'
