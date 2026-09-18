@@ -25,6 +25,89 @@ if (-not ($conf.bundle.PSObject.Properties.Name -contains 'resources')) {
 $conf.bundle.targets = @('nsis','msi')
 $conf | ConvertTo-Json -Depth 20 | Set-Content $confPath -Encoding UTF8
 
+# Fix Bridge Hub frontend camera startup.
+$mainJsPath = Join-Path $hub 'src/main.js'
+$mainJs = Get-Content $mainJsPath -Raw
+$oldAuto = @'
+    if (passed > 0 && elements.cameraSelect.options.length > 0) {
+      // Find the first option that represents a passed camera (skipping fallback/dividers)
+      for (let i = 0; i < elements.cameraSelect.options.length; i++) {
+        const val = parseInt(elements.cameraSelect.options[i].value);
+        if (cameras.find(c => c.index === val && c.success)) {
+          elements.cameraSelect.selectedIndex = i;
+          onCameraChange();
+          break;
+        }
+      }
+    }
+'@
+$newAuto = @'
+    if (passed > 0 && elements.cameraSelect.options.length > 0) {
+      // Select the first camera that actually passed the stream test.
+      for (let i = 0; i < elements.cameraSelect.options.length; i++) {
+        const val = parseInt(elements.cameraSelect.options[i].value);
+        if (cameras.find(c => c.index === val && c.success)) {
+          elements.cameraSelect.selectedIndex = i;
+          onCameraChange(false);
+          break;
+        }
+      }
+      await startTracking();
+    }
+'@
+if (-not $mainJs.Contains($oldAuto)) { throw 'Camera auto-selection block not found.' }
+$mainJs = $mainJs.Replace($oldAuto, $newAuto)
+
+$oldInit = @'
+  await refreshCameras();
+  elements.cameraSelect.value = 999;
+  startTracking();
+'@
+$newInit = @'
+  await refreshCameras();
+'@
+if (-not $mainJs.Contains($oldInit)) { throw 'Forced remote camera initialization not found.' }
+$mainJs = $mainJs.Replace($oldInit, $newInit)
+
+$oldChange = @'
+function onCameraChange() {
+  const val = elements.cameraSelect.value;
+  if (val == 999) {
+    elements.cameraInfo.textContent = "Remote Stream • MJPEG/Push";
+    return;
+  }
+  const selected = cameras.find(c => c.index == val);
+  if (selected) {
+    elements.cameraInfo.textContent = `${selected.name} • ${selected.backend || 'Auto'}`;
+  } else {
+    elements.cameraInfo.textContent = "Manual Selection";
+  }
+}
+'@
+$newChange = @'
+async function onCameraChange(restart = true) {
+  const val = elements.cameraSelect.value;
+  if (val == 999) {
+    elements.cameraInfo.textContent = "Remote Stream • MJPEG/Push";
+  } else {
+    const selected = cameras.find(c => c.index == val);
+    if (selected) {
+      elements.cameraInfo.textContent = `${selected.name} • ${selected.backend || 'Auto'}`;
+    } else {
+      elements.cameraInfo.textContent = "Manual Selection";
+    }
+  }
+  if (restart && elements.startBtn && !elements.startBtn.disabled) {
+    await stopTracking();
+    await startTracking();
+  }
+}
+'@
+if (-not $mainJs.Contains($oldChange)) { throw 'onCameraChange function not found.' }
+$mainJs = $mainJs.Replace($oldChange, $newChange)
+$mainJs = $mainJs.Replace('elements.videoFrame.src = "http://localhost:9001/stream";', 'elements.videoFrame.src = "http://127.0.0.1:9001/stream?ts=" + Date.now();')
+Set-Content $mainJsPath $mainJs -Encoding UTF8
+
 $libPath = Join-Path $hub 'src-tauri/src/lib.rs'
 $lib = Get-Content $libPath -Raw
 
